@@ -114,56 +114,33 @@ class StateTreeWoodcutter : TribotScript {
 
         val evaluators = listOf(
             buildEvaluator<AIContextProvider>(
-                onStart = {
-                    behaviorTree {
-                        sequence {
-                            perform {
-                                it.data.context.treeManager.tree = it.data.context.config.tree.tree
-                            }
-                            perform {
-                                Antiban.setScriptAiAntibanEnabled(false)
-                            }
-                            perform {
-                                paintThread.start()
-                            }
-                            perform {
-                                val currentTime = it.data.context.localTime
-                                val currentHour = currentTime.hour
-                                val context = it.data.context
-                                context.currentUIColor = getColorForHour(currentHour)
-                                context.lastColorUpdateHour = currentHour
-                                context.logger.info("Evaluator onStart color updated for hour: $currentHour")
-                            }
-                            perform {
-                                Painting.addPaint { g2 ->
-                                    g2.color = it.data.context.currentUIColor
-                                    g2.drawString("iChopper", 15, 60)
-                                    g2.drawString("State tree: ${stateTree?.currentStateName}", 15, 80)
-                                    g2.drawString("Local clock: ${it.data.context.localTime.let { getTimeFormatted(it) }}", 15, 100)
-                                    g2.drawString("Trees chopped: ${it.data.context.treesChoppedCounter}", 15, 120)
-                                    g2.drawString("Logs chopped: ${it.data.context.logsChoppedCounter}", 15, 140)
-                                }
-                            }
-                        }
+                onStartFunc = {
+                    val context = it.data.context
+                    context.treeManager.tree = context.config.tree.tree
+
+                    paintThread.start()
+                    Antiban.setScriptAiAntibanEnabled(false)
+
+                    val currentTime = context.localTime
+                    val currentHour = currentTime.hour
+                    context.currentUIColor = getColorForHour(currentHour)
+                    context.lastColorUpdateHour = currentHour
+                    context.logger.info("Evaluator onStart color updated for hour: $currentHour")
+
+                    Painting.addPaint { g2 ->
+                        g2.color = context.currentUIColor
+                        g2.drawString("iChopper", 15, 60)
+                        g2.drawString("State tree: ${stateTree?.currentStateName}", 15, 80)
+                        g2.drawString("Local clock: ${it.data.context.localTime.let { getTimeFormatted(it) }}", 15, 100)
+                        g2.drawString("Trees chopped: ${it.data.context.treesChoppedCounter}", 15, 120)
+                        g2.drawString("Logs chopped: ${it.data.context.logsChoppedCounter}", 15, 140)
                     }
                 },
-                onTick = {
-                    behaviorTree {
-                        sequence {
-                            perform {
-                                it.data.context.localTime = getCurrentTime()
-                            }
-                        }
-                    }
+                onTickFunc = {
+                    it.data.context.localTime = getCurrentTime()
                 },
-                onStop = {
-                    behaviorTree {
-                        sequence {
-                            perform {
-                                it.data.context.localTime = getCurrentTime()
-                            }
-                        }
-                    }
+                onStopFunc = {
+                    it.data.context.localTime = getCurrentTime()
                 }
             )
         )
@@ -436,104 +413,52 @@ fun buildChoppingTreeState() = buildState(
             shouldUseSpecialAttack()
         }
     ),
-    onEnter = {
-        behaviorTree {
-            sequence {
-                // Reset the idle tick counter on entering the state
-                perform {
-                    it.data.context.idleTickCounter = 0
-                }
-                // Take a snapshot of the initial log count
-                perform {
-                    it.data.context.initialLogCount = it.data.context.treeManager.getLogCount()
-                    it.data.context.logger.info("onEnter initial log count: ${it.data.context.initialLogCount}")
-                }
-                // Anticipate and set the next tree to hover
-                selector {
-                    condition {
-                        it.parameters.getGameObject(KEY_NEXT_TREE)?.let { tree ->
-                            it.data.context.treeManager.isTreeValid(tree)
-                        }
-                    }
-                    perform {
-                        val currentTree = it.parameters.getGameObject(KEY_CURRENT_TREE)
-                        val logger = it.data.context.logger
-                        it.data.context.treeManager.findNextTreeToHover(currentTree)?.let { tree ->
-                            logger.info("Found next tree during onEnter -> $tree")
-                            it.parameters[KEY_NEXT_TREE] = tree
-                        }
-                    }
-                }
+    onEnterFunc = {
+        val params = it.parameters
+        val context = it.data.context
+        val logger = context.logger
+
+        context.idleTickCounter = 0
+        context.initialLogCount = it.data.context.treeManager.getLogCount()
+        logger.info("onEnter initial log count: ${context.initialLogCount}")
+
+        val nextTree = params.getGameObject(KEY_NEXT_TREE)
+        if (nextTree === null || !context.treeManager.isTreeValid(nextTree)) {
+            val currentTree = params.getGameObject(KEY_CURRENT_TREE)
+            context.treeManager.findNextTreeToHover(currentTree)?.let { tree ->
+                logger.info("Found next tree during onEnter -> $tree")
+                params[KEY_NEXT_TREE] = tree
             }
         }
     },
-    onExit = {
-        behaviorTree {
-            sequence {
-                // Reset the idle tick counter on entering the state
-                perform {
-                    it.data.context.idleTickCounter = 0
-                }
-                // Take a snapshot of the final log count and update chopped counter
-                perform {
-                    it.data.context.finalLogCount = it.data.context.treeManager.getLogCount()
-                    val logsChopped = (it.data.context.finalLogCount - it.data.context.initialLogCount).coerceAtLeast(0)
-                    it.data.context.logsChoppedCounter += logsChopped
-                    it.data.context.logger.info("onExit final log count: ${it.data.context.finalLogCount}")
-                    it.data.context.logger.info("onExit logs chopped: $logsChopped")
-                }
-                // Check and change state if current tree chopped down
-                selector {
-                    condition {
-                        it.parameters.getGameObject(KEY_CURRENT_TREE)?.let { tree ->
-                            it.data.context.treeManager.isTreeValid(tree)
-                        }
-                    }
-                    sequence {
-                        perform {
-                            it.data.context.logger.info("Current tree chopped down during onExit")
-                        }
-                        perform {
-                            it.parameters[KEY_CURRENT_TREE] = null
-                        }
-                    }
-                }
-                // Check and change state if next tree chopped down
-                selector {
-                    condition {
-                        it.parameters.getGameObject(KEY_NEXT_TREE)?.let { tree ->
-                            it.data.context.treeManager.isTreeValid(tree)
-                        }
-                    }
-                    sequence {
-                        perform {
-                            it.data.context.logger.info("Next tree chopped down during onExit")
-                        }
-                        perform {
-                            it.parameters[KEY_NEXT_TREE] = null
-                        }
-                    }
-                }
-                // Set the currentTree if currentTree not valid and if nextTree was found during task execution and is valid still
-                selector {
-                    condition {
-                        it.parameters.getGameObject(KEY_CURRENT_TREE)?.let { tree ->
-                            it.data.context.treeManager.isTreeValid(tree)
-                        }
-                    }
-                    sequence {
-                        perform {
-                            it.data.context.logger.info("Assign nextTree to currentTree during onExit")
-                        }
-                        perform {
-                            it.parameters[KEY_CURRENT_TREE] = it.parameters[KEY_NEXT_TREE]
-                        }
-                        perform {
-                            it.parameters[KEY_NEXT_TREE] = null
-                        }
-                    }
-                }
-            }
+    onExitFunc = {
+        val params = it.parameters
+        val context = it.data.context
+        val logger = context.logger
+
+        context.idleTickCounter = 0
+        context.finalLogCount = context.treeManager.getLogCount()
+        val logsChopped = (context.finalLogCount - context.initialLogCount).coerceAtLeast(0)
+        context.logsChoppedCounter += logsChopped
+        logger.info("onExit final log count: ${it.data.context.finalLogCount}")
+        logger.info("onExit logs chopped: $logsChopped")
+
+        val currentTree = params.getGameObject(KEY_CURRENT_TREE)
+        if (currentTree !== null && !context.treeManager.isTreeValid(currentTree)) {
+            logger.info("Current tree chopped down during onExit")
+            params[KEY_CURRENT_TREE] = null
+        }
+
+        val nextTree = params.getGameObject(KEY_NEXT_TREE)
+        if (nextTree !== null && !context.treeManager.isTreeValid(nextTree)) {
+            logger.info("Next tree chopped down during onExit")
+            params[KEY_NEXT_TREE] = null
+        }
+
+        if (nextTree !== null && context.treeManager.isTreeValid(nextTree)) {
+            logger.info("Assign nextTree to currentTree during onExit")
+            params[KEY_CURRENT_TREE] = params[KEY_NEXT_TREE]
+            params[KEY_NEXT_TREE] = null
         }
     }
 )
