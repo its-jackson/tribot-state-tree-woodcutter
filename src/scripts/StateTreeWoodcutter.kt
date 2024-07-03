@@ -434,34 +434,51 @@ fun buildChoppingTreeState() = buildState(
     onExitFunc = {
         val params = it.parameters
         val context = it.data.context
+        val treeManager = context.treeManager
         val logger = context.logger
 
         context.idleTickCounter = 0
-        context.finalLogCount = context.treeManager.getLogCount()
+
+        context.finalLogCount = treeManager.getLogCount()
         val logsChopped = (context.finalLogCount - context.initialLogCount).coerceAtLeast(0)
         context.logsChoppedCounter += logsChopped
+
         logger.info("onExit final log count: ${it.data.context.finalLogCount}")
         logger.info("onExit logs chopped: $logsChopped")
 
-        val currentTree = params.getGameObject(KEY_CURRENT_TREE)
-        if (currentTree !== null && !context.treeManager.isTreeValid(currentTree)) {
-            logger.info("Current tree chopped down during onExit")
-            params[KEY_CURRENT_TREE] = null
-        }
-
-        val nextTree = params.getGameObject(KEY_NEXT_TREE)
-        if (nextTree !== null && !context.treeManager.isTreeValid(nextTree)) {
-            logger.info("Next tree chopped down during onExit")
-            params[KEY_NEXT_TREE] = null
-        }
-
-        if (nextTree !== null && context.treeManager.isTreeValid(nextTree)) {
-            logger.info("Assign nextTree to currentTree during onExit")
-            params[KEY_CURRENT_TREE] = params[KEY_NEXT_TREE]
-            params[KEY_NEXT_TREE] = null
-        }
+        handleTree(params, KEY_CURRENT_TREE, treeManager, logger)
+        handleTree(params, KEY_NEXT_TREE, treeManager, logger)
+        assignNextTreeToCurrentTree(params, treeManager, logger)
     }
 )
+
+private fun handleTree(
+    params: StateTreeParameters,
+    key: String,
+    treeManager: TreeManager,
+    logger: Logger
+) {
+    val tree = params.getGameObject(key)
+    if (tree !== null && !treeManager.isTreeValid(tree)) {
+        logger.info("$key chopped down during onExit")
+        params[key] = null
+    }
+}
+
+private fun assignNextTreeToCurrentTree(
+    params: StateTreeParameters,
+    treeManager: TreeManager,
+    logger: Logger
+) {
+    val currentTree = params.getGameObject(KEY_CURRENT_TREE)
+    val nextTree = params.getGameObject(KEY_NEXT_TREE)
+
+    if (nextTree !== null && currentTree === null && treeManager.isTreeValid(nextTree)) {
+        logger.info("Assign nextTree to currentTree during onExit")
+        params[KEY_CURRENT_TREE] = nextTree
+        params[KEY_NEXT_TREE] = null
+    }
+}
 
 fun buildChoppingTreeTask() = buildTask<AIContextProvider> {
     behaviorTree {
